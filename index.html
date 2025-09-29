@@ -220,14 +220,11 @@
                 <div id="content-list"></div>
             </div>
             
-            <button class="refresh-btn" onclick="loadFromSheet()">🔄 Refresh Data</button>
         </div>
     </div>
 
     <script>
-        const API_KEY = 'AIzaSyBKdHN9jr_P_4XHlqsfGmVsiqEs2WAu6qI';
-        const SHEET_ID = '1F0_vlVfmtEidpTOv7_XWhzqXYH4ZWwyLMlZfZwlv8dQ';
-        const SHEET_NAME = 'Sheet1';
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyEcinRDyeUBcZbU4wP0IUhcIyG4wv3ggFbojQIolXjTyR-c7cx6Fzq321zg0sY7zxz/exec';
         
         const proposals = {
             'Acara & Kejohanan': [
@@ -310,6 +307,7 @@
         };
 
         let sheetData = {};
+        let isSaving = false;
 
         function updateSyncStatus(message, type = 'syncing') {
             const status = document.getElementById('syncStatus');
@@ -321,19 +319,15 @@
             updateSyncStatus('🔄 Memuat data dari Google Sheets...', 'syncing');
             
             try {
-                const response = await fetch(
-                    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${SHEET_NAME}!A2:D?key=${API_KEY}`
-                );
+                const response = await fetch(SCRIPT_URL);
+                const result = await response.json();
                 
-                if (!response.ok) {
+                if (!result.success) {
                     throw new Error('Gagal memuat data');
                 }
                 
-                const data = await response.json();
-                const rows = data.values || [];
-                
                 sheetData = {};
-                rows.forEach(row => {
+                result.data.forEach(row => {
                     if (row[1]) {
                         sheetData[row[1]] = {
                             kategori: row[0] || '',
@@ -352,7 +346,10 @@
             }
         }
 
-        async function saveToSheet(kategori, nama, status, organisasi) {
+        async function saveToSheet() {
+            if (isSaving) return;
+            isSaving = true;
+            
             updateSyncStatus('💾 Menyimpan...', 'syncing');
             
             try {
@@ -360,38 +357,31 @@
                 
                 Object.keys(proposals).forEach(cat => {
                     proposals[cat].forEach(proposal => {
-                        const data = sheetData[proposal] || {};
-                        if (proposal === nama) {
-                            allRows.push([kategori, nama, status, organisasi]);
-                        } else {
-                            allRows.push([
-                                data.kategori || cat,
-                                proposal,
-                                data.status || 'Belum Dihantar',
-                                data.organisasi || ''
-                            ]);
-                        }
+                        const data = sheetData[proposal] || {
+                            kategori: cat,
+                            status: 'Belum Dihantar',
+                            organisasi: ''
+                        };
+                        allRows.push([
+                            data.kategori,
+                            proposal,
+                            data.status,
+                            data.organisasi
+                        ]);
                     });
                 });
                 
-                const response = await fetch(
-                    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${SHEET_NAME}!A2:D?valueInputOption=RAW&key=${API_KEY}`,
-                    {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            values: allRows
-                        })
-                    }
-                );
+                const response = await fetch(SCRIPT_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ rows: allRows })
+                });
                 
-                if (!response.ok) {
+                const result = await response.json();
+                
+                if (!result.success) {
                     throw new Error('Gagal menyimpan');
                 }
                 
-                sheetData[nama] = { kategori, status, organisasi };
                 updateSyncStatus('✅ Disimpan', 'synced');
                 
                 setTimeout(() => {
@@ -400,6 +390,8 @@
             } catch (error) {
                 console.error('Error:', error);
                 updateSyncStatus('❌ Gagal menyimpan. Cuba lagi.', 'error');
+            } finally {
+                isSaving = false;
             }
         }
 
@@ -412,9 +404,9 @@
             div.setAttribute('data-name', name);
             
             div.innerHTML = `
-                <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="handleCheck('${name}', '${category}', this)">
+                <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="handleCheck('${name.replace(/'/g, "\\'")}', '${category}', this)">
                 <label class="item-name">${name}</label>
-                <input type="text" class="org-input" placeholder="Nama Organisasi" value="${data.organisasi}" onchange="handleOrgChange('${name}', '${category}', this.value)">
+                <input type="text" class="org-input" placeholder="Nama Organisasi" value="${data.organisasi}" onchange="handleOrgChange('${name.replace(/'/g, "\\'")}', '${category}', this.value)">
             `;
             
             return div;
@@ -432,16 +424,24 @@
                 item.classList.remove('checked');
             }
             
-            saveToSheet(category, name, status, organisasi);
+            if (!sheetData[name]) {
+                sheetData[name] = { kategori: category, status: '', organisasi: '' };
+            }
+            sheetData[name].kategori = category;
+            sheetData[name].status = status;
+            sheetData[name].organisasi = organisasi;
+            
+            saveToSheet();
             updateStats();
         }
 
         function handleOrgChange(name, category, value) {
-            const item = document.querySelector(`[data-name="${name}"]`);
-            const checkbox = item.querySelector('input[type="checkbox"]');
-            const status = checkbox.checked ? 'Dihantar' : 'Belum Dihantar';
+            if (!sheetData[name]) {
+                sheetData[name] = { kategori: category, status: 'Belum Dihantar', organisasi: '' };
+            }
+            sheetData[name].organisasi = value;
             
-            saveToSheet(category, name, status, value);
+            saveToSheet();
         }
 
         function updateStats() {
