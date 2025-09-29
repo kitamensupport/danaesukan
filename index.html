@@ -346,34 +346,22 @@
             }
         }
 
-        async function saveToSheet() {
+        async function saveToSheet(kategori, namaProposal, status, organisasi) {
             if (isSaving) return;
             isSaving = true;
             
             updateSyncStatus('💾 Menyimpan...', 'syncing');
             
             try {
-                const allRows = [];
-                
-                Object.keys(proposals).forEach(cat => {
-                    proposals[cat].forEach(proposal => {
-                        const data = sheetData[proposal] || {
-                            kategori: cat,
-                            status: 'Belum Dihantar',
-                            organisasi: ''
-                        };
-                        allRows.push([
-                            data.kategori,
-                            proposal,
-                            data.status,
-                            data.organisasi
-                        ]);
-                    });
-                });
-                
                 const response = await fetch(SCRIPT_URL, {
                     method: 'POST',
-                    body: JSON.stringify({ rows: allRows })
+                    body: JSON.stringify({
+                        action: 'updateRow',
+                        kategori: kategori,
+                        namaProposal: namaProposal,
+                        status: status,
+                        organisasi: organisasi
+                    })
                 });
                 
                 const result = await response.json();
@@ -431,7 +419,7 @@
             sheetData[name].status = status;
             sheetData[name].organisasi = organisasi;
             
-            saveToSheet();
+            saveToSheet(category, name, status, organisasi);
             updateStats();
         }
 
@@ -441,7 +429,11 @@
             }
             sheetData[name].organisasi = value;
             
-            saveToSheet();
+            const item = document.querySelector(`[data-name="${name}"]`);
+            const checkbox = item.querySelector('input[type="checkbox"]');
+            const status = checkbox.checked ? 'Dihantar' : 'Belum Dihantar';
+            
+            saveToSheet(category, name, status, value);
         }
 
         function updateStats() {
